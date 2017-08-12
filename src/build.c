@@ -23,7 +23,7 @@ static void setup_path(lua_State *L)
 static void setup_libs(lua_State *L)
 {
     setup_path(L);
-    new_setup(L);
+    setup_new(L);
 }
 
 

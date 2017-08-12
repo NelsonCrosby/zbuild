@@ -109,7 +109,7 @@ static int L_new_class(lua_State *L)
     return 1;
 }
 
-void new_setup(lua_State *L)
+void setup_new(lua_State *L)
 {
     lua_pushlightuserdata(L, (void *) L_new);
     // Setup new/mt
