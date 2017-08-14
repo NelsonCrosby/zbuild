@@ -133,11 +133,77 @@ static int parse_value(lua_State *L,
     }
 }
 
+struct _str {
+    size_t length;
+    const char *value;
+};
+static int check_str(size_t checklen, const char *checkval,
+    const struct _str against[]);
+static int check_integer(size_t checklen, const char *checkval,
+    lua_Integer *out);
+static int check_number(size_t checklen, const char *checkval,
+    lua_Number *out);
+
 static int parse_scalar(lua_State *L,
     yaml_parser_t *parser, yaml_event_t *event)
 {
-    lua_pushlstring(L, event->data.scalar.value,
-                    event->data.scalar.length);
+    size_t len = event->data.scalar.length;
+    const char *str = event->data.scalar.value;
+
+    yaml_scalar_style_t lit_style = event->data.scalar.style;
+    if (lit_style != YAML_PLAIN_SCALAR_STYLE) {
+        // Quoted, skip parsing
+        lua_pushlstring(L, str, len);
+        goto _ok;
+    }
+
+    static const struct _str check_null[] = {
+        {0, ""}, {1, "~"}, {4, "null"}, {4, "Null"}, {4, "NULL"},
+        {0, NULL}
+    };
+    if (check_str(len, str, check_null)) {
+        lua_pushnil(L);
+        goto _ok;
+    }
+
+    static const struct _str check_true[] = {
+        {1, "y"}, {1, "Y"}, {3, "yes"}, {3, "Yes"}, {3, "YES"},
+        {4, "true"}, {4, "True"}, {4, "TRUE"},
+        {2, "on"}, {2, "On"}, {2, "ON"},
+        {0, NULL}
+    };
+    if (check_str(len, str, check_true)) {
+        lua_pushboolean(L, 1);
+        goto _ok;
+    }
+
+    static const struct _str check_false[] = {
+        {1, "n"}, {1, "N"}, {2, "no"}, {2, "No"}, {2, "NO"},
+        {5, "false"}, {5, "False"}, {5, "FALSE"},
+        {3, "off"}, {3, "Off"}, {3, "OFF"},
+        {0, NULL}
+    };
+    if (check_str(len, str, check_false)) {
+        lua_pushboolean(L, 0);
+        goto _ok;
+    }
+    
+    lua_Integer n_i;
+    if (check_integer(len, str, &n_i)) {
+        lua_pushinteger(L, n_i);
+        goto _ok;
+    }
+
+    lua_Number n_f;
+    if (check_number(len, str, &n_f)) {
+        lua_pushnumber(L, n_f);
+        goto _ok;
+    }
+
+    // Isn't anything else, must be str
+    lua_pushlstring(L, str, len);
+
+_ok:
     yaml_event_delete(event);
     return 1;
 }
@@ -192,6 +258,109 @@ static int parse_sequence(lua_State *L,
     }
 
     return 1;
+}
+
+static int check_str(size_t checklen, const char *checkval,
+    const struct _str against[])
+{
+    for (int i = 0; against[i].value != NULL; i += 1) {
+        if (checklen == against[i].length
+            && strncmp(checkval, against[i].value, checklen) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int check_integer(size_t checklen, const char *checkval,
+    lua_Integer *out)
+{
+    lua_Integer value = 0;
+    int sign = 0;
+    enum { FMT_PRE, FMT_SPEC, FMT_POST } format_pos = FMT_PRE;
+    enum { FMT_DEC, FMT_BIN, FMT_OCT, FMT_HEX } format = FMT_DEC;
+
+    for (int i = 0; i < checklen; i += 1) {
+        char c = checkval[i];
+        if (c == '-') {
+            if (sign) return 0;
+            sign = -1;
+            continue;
+        } else if (c == '+') {
+            if (sign) return 0;
+            sign = 1;
+            continue;
+        }
+
+        if (format_pos == FMT_PRE) {
+            if (c == '0') {
+                format = FMT_OCT;
+                format_pos = FMT_SPEC;
+                continue;
+            } else {
+                format_pos = FMT_POST;
+            }
+        } else if (format_pos == FMT_SPEC) {
+            if (c == 'b') {
+                format = FMT_BIN;
+                format_pos = FMT_POST;
+                continue;
+            } else if (c == 'x') {
+                format = FMT_HEX;
+                format_pos = FMT_POST;
+                continue;
+            } else if (c >= '0' && c <= '7' || c == '_') {
+                format_pos = FMT_POST;
+            } else {
+                return 0;
+            }
+        }
+
+        if (format_pos == FMT_POST) {
+            if (c == '_') continue;
+            int cval = c - '0';
+            switch (format) {
+            case FMT_DEC:
+                if (cval >= 0 && cval <= 9) {
+                    value = (value * 10) + cval;
+                    continue;
+                } else break;
+            case FMT_BIN:
+                if (cval == 0 || cval == 1) {
+                    value = (value << 1) | cval;
+                    continue;
+                } else break;
+            case FMT_OCT:
+                if (cval >= 0 && cval <= 7) {
+                    value = (value << 3) | cval;
+                    continue;
+                } else break;
+            case FMT_HEX:
+                if (cval >= 0 && cval <= 9) {
+                    value = (value << 4) | cval;
+                    continue;
+                } else if (c >= 'a' && c <= 'f') {
+                    value = (value << 4) | ((c - 'a') + 10);
+                    continue;
+                } else if (c >= 'A' && c <= 'F') {
+                    value = (value << 4) | ((c - 'A') + 10);
+                    continue;
+                } else break;
+            }
+        }
+
+        return 0;
+    }
+
+    *out = value * (sign ? sign : 1);
+    return 1;
+}
+
+static int check_number(size_t checklen, const char *checkval,
+    lua_Number *out)
+{
+    return 0;
 }
 
 
