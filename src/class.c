@@ -77,6 +77,31 @@ void new_type(lua_State *L,
 }
 
 
+static void getmethod(lua_State *L, int oidx, const char *method, int nargs)
+{
+    lua_pushvalue(L, oidx);         // Copy object
+    lua_insert(L, -(nargs + 1));    // Move copy to first arg
+    lua_getfield(L, -(nargs + 1), method);  // Get method
+    lua_insert(L, -(nargs + 2));    // Move method before args
+}
+
+void lua_call_method(lua_State *L,
+    int oidx, const char *method,
+    int nargs, int nret)
+{
+    getmethod(L, oidx, method, nargs);
+    lua_call(L, nargs + 1, nret);
+}
+
+int lua_pcall_method(lua_State *L,
+    int oidx, const char *method,
+    int nargs, int nret, int msgh)
+{
+    getmethod(L, oidx, method, nargs);
+    return lua_pcall(L, nargs + 1, nret, msgh);
+}
+
+
 static int L_new_createtable(lua_State *L)
 {
     lua_createtable(L, 0, 0);

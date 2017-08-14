@@ -24,6 +24,7 @@ static void setup_libs(lua_State *L)
 {
     setup_path(L);
     setup_new(L);
+    setup_yaml(L);
 }
 
 
