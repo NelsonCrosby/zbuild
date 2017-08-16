@@ -3,7 +3,7 @@
 -include devconf.make
 
 CFLAGS += -MMD
-LDLIBS += -llua -lyaml
+LDLIBS += -lm -llua -lyaml
 
 build_SRC = build.c class.c util.c yaml.c
 build_C = $(build_SRC:%=src/%)

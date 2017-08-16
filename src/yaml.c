@@ -1,4 +1,5 @@
 
+#include <math.h>
 #include <string.h>
 
 #include <lua.h>
@@ -137,7 +138,7 @@ struct _str {
     size_t length;
     const char *value;
 };
-static int check_str(size_t checklen, const char *checkval,
+static int check_kw(size_t checklen, const char *checkval,
     const struct _str against[]);
 static int check_integer(size_t checklen, const char *checkval,
     lua_Integer *out);
@@ -161,7 +162,7 @@ static int parse_scalar(lua_State *L,
         {0, ""}, {1, "~"}, {4, "null"}, {4, "Null"}, {4, "NULL"},
         {0, NULL}
     };
-    if (check_str(len, str, check_null)) {
+    if (check_kw(len, str, check_null)) {
         lua_pushnil(L);
         goto _ok;
     }
@@ -172,7 +173,7 @@ static int parse_scalar(lua_State *L,
         {2, "on"}, {2, "On"}, {2, "ON"},
         {0, NULL}
     };
-    if (check_str(len, str, check_true)) {
+    if (check_kw(len, str, check_true)) {
         lua_pushboolean(L, 1);
         goto _ok;
     }
@@ -183,7 +184,7 @@ static int parse_scalar(lua_State *L,
         {3, "off"}, {3, "Off"}, {3, "OFF"},
         {0, NULL}
     };
-    if (check_str(len, str, check_false)) {
+    if (check_kw(len, str, check_false)) {
         lua_pushboolean(L, 0);
         goto _ok;
     }
@@ -260,7 +261,7 @@ static int parse_sequence(lua_State *L,
     return 1;
 }
 
-static int check_str(size_t checklen, const char *checkval,
+static int check_kw(size_t checklen, const char *checkval,
     const struct _str against[])
 {
     for (int i = 0; against[i].value != NULL; i += 1) {
@@ -291,6 +292,8 @@ static int check_integer(size_t checklen, const char *checkval,
             if (sign) return 0;
             sign = 1;
             continue;
+        } else {
+            sign = 1;
         }
 
         if (format_pos == FMT_PRE) {
@@ -353,14 +356,78 @@ static int check_integer(size_t checklen, const char *checkval,
         return 0;
     }
 
-    *out = value * (sign ? sign : 1);
+    *out = value * sign;
     return 1;
 }
 
 static int check_number(size_t checklen, const char *checkval,
     lua_Number *out)
 {
-    return 0;
+    lua_Number value = 0.0;
+    lua_Number sign = 0.0;
+    lua_Number fract_mag = 1.0;
+    lua_Integer expn = 0;
+    lua_Integer expn_sign = 0;
+    enum { FMT_WHOLE, FMT_FRACT, FMT_EXP } fmt_pos = FMT_WHOLE;
+
+    for (int i = 0; i < checklen; i += 1) {
+        char c = checkval[i];
+        if (!sign) {
+            if (c == '+') {
+                sign = 1.0;
+                continue;
+            } else if (c == '-') {
+                sign = -1.0;
+                continue;
+            } else {
+                sign = 1.0;
+            }
+        }
+        
+        if (fmt_pos == FMT_EXP && !expn_sign) {
+            if (c == '+') {
+                expn_sign = 1;
+                continue;
+            } else if (c == '-') {
+                expn_sign = -1;
+                continue;
+            } else {
+                expn_sign = 1;
+            }
+        }
+
+        if (c == '.') {
+            if (fmt_pos != FMT_WHOLE) return 0;
+            fmt_pos = FMT_FRACT;
+            continue;
+        }
+
+        if (c == 'e' || c == 'E') {
+            if (fmt_pos == FMT_EXP) return 0;
+            fmt_pos = FMT_EXP;
+            expn = 0;
+            continue;
+        }
+
+        if (c >= '0' && c <= '9') {
+            int cval = c - '0';
+
+            switch (fmt_pos) {
+            case FMT_WHOLE:
+                value = (value * 10.0) + ((lua_Number) cval);
+                break;
+            case FMT_FRACT:
+                value += ((lua_Number) cval) * (fract_mag /= 10.0);
+                break;
+            case FMT_EXP:
+                expn = (expn * 10) + cval;
+                break;
+            }
+        }
+    }
+
+    *out = value * sign * l_mathop(pow)(10, (lua_Number) (expn * expn_sign));
+    return 1;
 }
 
 
